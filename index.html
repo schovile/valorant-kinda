@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ascent — Tactical Map</title>
+<style>
+  /* ================================================================
+     Page chrome — dark tactical UI, single-file inline styles
+     ================================================================ */
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: #0d1014;
+    color: #e5e1d6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  header {
+    padding: 10px 18px;
+    background: #14181f;
+    border-bottom: 1px solid #2a2f3a;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: 3px;
+    font-weight: 700;
+    color: #f0ebd8;
+  }
+  header .sub {
+    color: #6b7585;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .controls { margin-left: auto; display: flex; gap: 6px; }
+  button {
+    background: #1f242d;
+    color: #c8c2b3;
+    border: 1px solid #323845;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  button:hover { background: #2a3140; border-color: #4a5570; color: #f0ebd8; }
+  button.active {
+    background: #3d4a64;
+    border-color: #6080b0;
+    color: #f0ebd8;
+  }
+
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #0d1014;
+  }
+  canvas { display: block; cursor: crosshair; }
+
+  /* Floating UI overlays */
+  #tooltip {
+    position: absolute;
+    background: rgba(15,17,22,0.95);
+    border: 1px solid #4a5570;
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s;
+    color: #f0ebd8;
+    white-space: nowrap;
+  }
+  #tooltip.visible { opacity: 1; }
+
+  #info {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: rgba(15,17,22,0.9);
+    border: 1px solid #2a2f3a;
+    padding: 12px 16px;
+    border-radius: 4px;
+    min-width: 200px;
+    backdrop-filter: blur(4px);
+  }
+  #info .label {
+    color: #6b7585;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  #info .name {
+    font-size: 16px;
+    margin-top: 4px;
+    font-weight: 700;
+    color: #f0ebd8;
+    letter-spacing: 0.5px;
+  }
+  #info .desc {
+    font-size: 12px;
+    margin-top: 4px;
+    color: #9ba3b0;
+    min-height: 14px;
+  }
+
+  #legend {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: rgba(15,17,22,0.9);
+    border: 1px solid #2a2f3a;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    backdrop-filter: blur(4px);
+  }
+  #legend h3 {
+    margin: 0 0 8px 0;
+    font-size: 10px;
+    color: #6b7585;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 700;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+    color: #c8c2b3;
+  }
+  .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid #4a5570;
+    flex-shrink: 0;
+  }
+
+  #hint {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    color: #5b6373;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-align: right;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>ASCENT</h1>
+    <span class="sub">Top-Down Tactical Map · Original Interpretation</span>
+    <div class="controls">
+      <button id="toggle-labels" class="active">Labels</button>
+      <button id="toggle-grid">Grid</button>
+      <button id="clear-pings">Clear Pings</button>
+    </div>
+  </header>
+  <div id="canvas-wrap">
+    <canvas id="map"></canvas>
+    <div id="tooltip"></div>
+    <div id="info">
+      <div class="label">Hovered Area</div>
+      <div class="name" id="info-name">—</div>
+      <div class="desc" id="info-desc">Hover any callout to inspect</div>
+    </div>
+    <div id="legend">
+      <h3>Legend</h3>
+      <div class="legend-item"><span class="swatch" style="background:#d4c5a0"></span>Walkable</div>
+      <div class="legend-item"><span class="swatch" style="background:#b3c0cf"></span>Mid Lanes</div>
+      <div class="legend-item"><span class="swatch" style="background:#d49080;border-color:#c46a4a"></span>Plant Site (A/B)</div>
+      <div class="legend-item"><span class="swatch" style="background:#7fa3d4"></span>Defender Spawn</div>
+      <div class="legend-item"><span class="swatch" style="background:#d48080"></span>Attacker Spawn</div>
+      <div class="legend-item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#8a6f5c,#8a6f5c 4px,#5a4738 4px,#5a4738 8px)"></span>Destructible Doors</div>
+      <div class="legend-item"><span class="swatch" style="background:#1f1c18"></span>Wall</div>
+    </div>
+    <div id="hint">CLICK to ping · HOVER to inspect</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ====================================================================
+   GEOMETRY DEFINITIONS
+   --------------------------------------------------------------------
+   The map lives in a fixed logical 1200×900 coordinate space and is
+   transformed to screen space each frame so it scales responsively
+   while preserving aspect ratio.
+
+   Each area is a polygon (array of [x,y] points) with a category that
+   determines its fill color, a label position, and an optional desc
+   shown in the info panel on hover.
+   ==================================================================== */
+const MAP_W = 1200;
+const MAP_H = 900;
+
+const AREAS = [
+  // ---- Defender side (top) -----------------------------------------
+  // T-shaped: wide spawn area + a connector that drops down to Mid Doors.
+  { id:'def_spawn', name:'Defender Spawn', cat:'def',
+    desc:'Defender starting position',
+    pts:[[280,50],[920,50],[920,140],[720,140],[720,205],[500,205],[500,140],[280,140]],
+    label:[600,95] },
+
+  // ---- A side cluster (top-left) -----------------------------------
+  { id:'a_heaven', name:'A Heaven', cat:'walk',
+    desc:'Elevated overlook above A Site',
+    pts:[[80,140],[230,140],[230,210],[80,210]],
+    label:[155,178] },
+
+  { id:'a_site', name:'A Site', cat:'site',
+    desc:'Spike plant zone — left bombsite', plant:true,
+    pts:[[80,210],[330,210],[330,330],[80,330]],
+    label:[180,255] },
+
+  { id:'a_generator', name:'A Generator', cat:'walk',
+    desc:'Cover position with generator prop',
+    pts:[[230,330],[330,330],[330,410],[230,410]],
+    label:[280,375] },
+
+  { id:'a_link', name:'A Link', cat:'walk',
+    desc:'Connector between A Site and Mid Catwalk',
+    pts:[[330,260],[470,260],[470,330],[330,330]],
+    label:[400,295] },
+
+  { id:'a_main', name:'A Main', cat:'walk',
+    desc:'Attacker main entry to A Site',
+    pts:[[80,330],[230,330],[230,720],[80,720]],
+    label:[155,520] },
+
+  { id:'a_lobby', name:'A Lobby', cat:'walk',
+    desc:'Attacker lobby leading to A Main',
+    pts:[[80,720],[380,720],[380,860],[80,860]],
+    label:[230,790] },
+
+  // ---- Mid section (center vertical corridor) ----------------------
+  { id:'mid_doors', name:'Mid Doors', cat:'doors',
+    desc:'Destructible double doors — break for line of sight',
+    pts:[[560,205],[660,205],[660,275],[560,275]],
+    label:[610,240] },
+
+  { id:'mid_pizza', name:'Mid Pizza', cat:'mid',
+    desc:'Open area just south of Mid Doors',
+    pts:[[470,275],[730,275],[730,370],[470,370]],
+    label:[600,322] },
+
+  { id:'mid_catwalk', name:'Mid Catwalk', cat:'mid',
+    desc:'Raised lane between Mid and A Link',
+    pts:[[330,330],[470,330],[470,440],[330,440]],
+    label:[400,385] },
+
+  { id:'mid_courtyard', name:'Mid Courtyard', cat:'mid',
+    desc:'Central courtyard — heart of the map',
+    pts:[[470,370],[730,370],[730,500],[470,500]],
+    label:[600,435] },
+
+  { id:'mid_bottom', name:'Mid Bottom', cat:'mid',
+    desc:'Attacker entry into Mid Courtyard',
+    pts:[[470,500],[730,500],[730,720],[470,720]],
+    label:[600,610] },
+
+  // ---- B side cluster (top-right) ----------------------------------
+  { id:'b_site', name:'B Site', cat:'site',
+    desc:'Spike plant zone — right bombsite (stack of boxes)', plant:true,
+    pts:[[820,210],[1120,210],[1120,330],[820,330]],
+    label:[990,255] },
+
+  { id:'market', name:'Market', cat:'walk',
+    desc:'Connector between B Site and Mid Pizza',
+    pts:[[730,210],[820,210],[820,400],[730,400]],
+    label:[775,305] },
+
+  { id:'b_link', name:'B Link', cat:'walk',
+    desc:'Connector between B Site and Mid Pizza',
+    pts:[[820,330],[940,330],[940,420],[820,420]],
+    label:[880,375] },
+
+  { id:'b_stairs', name:'B Stairs', cat:'walk',
+    desc:'Stairwell leading down from B Site',
+    pts:[[1020,330],[1120,330],[1120,420],[1020,420]],
+    label:[1070,375] },
+
+  { id:'b_main', name:'B Main', cat:'walk',
+    desc:'Attacker main entry to B Site',
+    pts:[[940,420],[1120,420],[1120,720],[940,720]],
+    label:[1030,560] },
+
+  { id:'b_lobby', name:'B Lobby', cat:'walk',
+    desc:'Attacker lobby leading to B Main',
+    pts:[[820,720],[1120,720],[1120,860],[820,860]],
+    label:[970,790] },
+
+  // ---- Attacker side (bottom) --------------------------------------
+  { id:'att_spawn', name:'Attacker Spawn', cat:'att',
+    desc:'Attacker starting position',
+    pts:[[380,720],[820,720],[820,860],[380,860]],
+    label:[600,790] },
+];
+
+// Site-plant default sub-zones drawn as dashed accents inside each site.
+const PLANT_DEFAULTS = [
+  { siteId:'a_site', pts:[[180,250],[300,250],[300,310],[180,310]] }, // A default
+  { siteId:'b_site', pts:[[930,250],[1080,250],[1080,310],[930,310]] }, // B boxes
+];
+
+// Color palette
+const COLORS = {
+  bg:        '#0d1014',
+  wall:      '#1f1c18',
+  walk:      '#d4c5a0',
+  mid:       '#b3c0cf',
+  site:      '#d49080',
+  plant:     'rgba(196,106,74,0.55)',
+  plantDash: 'rgba(90,30,15,0.85)',
+  doors:     '#8a6f5c',
+  doorPanel: '#6b5340',
+  doorEdge:  '#3a2e25',
+  def:       '#7fa3d4',
+  att:       '#d48080',
+  outline:   '#3a3530',
+  labelText: '#f0ebd8',
+  labelBg:   'rgba(15,17,22,0.7)',
+  hover:     'rgba(255,240,180,0.30)',
+  hoverEdge: '#fff5b8',
+  pingColor: '255,220,80',
+  arrow:     '#1a1d24',
+};
+
+function colorFor(area) {
+  switch (area.cat) {
+    case 'site':  return COLORS.site;
+    case 'mid':   return COLORS.mid;
+    case 'def':   return COLORS.def;
+    case 'att':   return COLORS.att;
+    case 'doors': return COLORS.doors;
+    default:      return COLORS.walk;
+  }
+}
+
+/* ====================================================================
+   CANVAS SETUP & RESPONSIVE TRANSFORM
+   ==================================================================== */
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('canvas-wrap');
+const DPR = Math.max(1, window.devicePixelRatio || 1);
+
+let scale = 1, offsetX = 0, offsetY = 0;
+
+function resize() {
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  canvas.width = Math.floor(w * DPR);
+  canvas.height = Math.floor(h * DPR);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  // Fit map to viewport, preserve aspect ratio, leave a small margin.
+  const sx = w / MAP_W, sy = h / MAP_H;
+  scale = Math.min(sx, sy) * 0.94;
+  offsetX = (w - MAP_W * scale) / 2;
+  offsetY = (h - MAP_H * scale) / 2;
+}
+window.addEventListener('resize', resize);
+
+// Logical → screen and inverse helpers
+function toScreen(x, y) { return [offsetX + x * scale, offsetY + y * scale]; }
+function toLogical(sx, sy) { return [(sx - offsetX) / scale, (sy - offsetY) / scale]; }
+
+/* ====================================================================
+   HIT TESTING (point-in-polygon, ray casting)
+   ==================================================================== */
+function pointInPolygon(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0], yi = pts[i][1];
+    const xj = pts[j][0], yj = pts[j][1];
+    const intersect = ((yi > y) !== (yj > y)) &&
+                      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function findArea(lx, ly) {
+  // Reverse iteration so later (more specific) areas win on overlap.
+  for (let i = AREAS.length - 1; i >= 0; i--) {
+    if (pointInPolygon(lx, ly, AREAS[i].pts)) return AREAS[i];
+  }
+  return null;
+}
+
+/* ====================================================================
+   APP STATE
+   ==================================================================== */
+let hoveredId = null;
+let showLabels = true;
+let showGrid = false;
+const pings = []; // { x, y, t0 }
+const PING_LIFETIME_MS = 2200;
+
+/* ====================================================================
+   RENDER PIPELINE
+   --------------------------------------------------------------------
+   Order: background → wall pad → area fills → plant accents → mid
+   doors detail → spawn arrows → hover overlay → grid → labels →
+   pings → compass.
+   ==================================================================== */
+function draw() {
+  const cw = canvas.width / DPR;
+  const ch = canvas.height / DPR;
+
+  ctx.save();
+  ctx.scale(DPR, DPR);
+
+  // Background
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Wall slab (bordered map background)
+  ctx.fillStyle = COLORS.wall;
+  ctx.fillRect(offsetX - 12, offsetY - 12, MAP_W * scale + 24, MAP_H * scale + 24);
+
+  // Subtle outer frame
+  ctx.strokeStyle = '#3a4050';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(offsetX - 12, offsetY - 12, MAP_W * scale + 24, MAP_H * scale + 24);
+
+  // 1. Walkable / spawn / mid / site polygons
+  for (const a of AREAS) drawArea(a);
+
+  // 2. Plant default accents inside each site
+  drawPlantDefaults();
+
+  // 3. Plant icons (P) on site centroids
+  for (const a of AREAS) if (a.plant) drawPlantIcon(a);
+
+  // 4. Mid doors panel detail (hatched destructible)
+  drawMidDoorsDetail();
+
+  // 5. Spawn direction arrows
+  drawSpawnArrows();
+
+  // 6. Hover highlight overlay
+  if (hoveredId) {
+    const a = AREAS.find(x => x.id === hoveredId);
+    if (a) drawHover(a);
+  }
+
+  // 7. Optional grid overlay
+  if (showGrid) drawGrid();
+
+  // 8. Callout labels
+  if (showLabels) for (const a of AREAS) drawLabel(a);
+
+  // 9. Animated pings
+  drawPings();
+
+  // 10. Compass / north indicator
+  drawCompass();
+
+  ctx.restore();
+}
+
+function pathPolygon(pts) {
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const [sx, sy] = toScreen(pts[i][0], pts[i][1]);
+    if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+  }
+  ctx.closePath();
+}
+
+function drawArea(a) {
+  pathPolygon(a.pts);
+  ctx.fillStyle = colorFor(a);
+  ctx.fill();
+  // Plant zone tint laid over site fill
+  if (a.plant) {
+    ctx.fillStyle = COLORS.plant;
+    ctx.fill();
+  }
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = COLORS.outline;
+  ctx.stroke();
+}
+
+function drawPlantDefaults() {
+  ctx.save();
+  ctx.setLineDash([6, 5]);
+  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = COLORS.plantDash;
+  for (const d of PLANT_DEFAULTS) {
+    pathPolygon(d.pts);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawPlantIcon(a) {
+  // Centered 'P' badge slightly offset below the site label.
+  const [cx, cy] = toScreen(a.label[0] + 60, a.label[1]);
+  const r = 13 * scale;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#f0ebd8';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#5a2a1a';
+  ctx.stroke();
+  ctx.fillStyle = '#5a2a1a';
+  ctx.font = `bold ${14 * scale}px system-ui`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('P', cx, cy + 1);
+  ctx.restore();
+}
+
+function drawMidDoorsDetail() {
+  const door = AREAS.find(a => a.id === 'mid_doors');
+  if (!door) return;
+  const [x0, y0] = toScreen(door.pts[0][0], door.pts[0][1]);
+  const [x1, y1] = toScreen(door.pts[2][0], door.pts[2][1]);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  ctx.save();
+  // Two door panels with a small gap in the middle
+  ctx.fillStyle = COLORS.doorPanel;
+  ctx.fillRect(x0 + 3, y0 + 3, w / 2 - 5, h - 6);
+  ctx.fillRect(x0 + w / 2 + 2, y0 + 3, w / 2 - 5, h - 6);
+  ctx.strokeStyle = COLORS.doorEdge;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x0 + 3, y0 + 3, w / 2 - 5, h - 6);
+  ctx.strokeRect(x0 + w / 2 + 2, y0 + 3, w / 2 - 5, h - 6);
+  // Diagonal hatching to suggest destructible material
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = -h; i < w; i += Math.max(6, 8 * scale)) {
+    ctx.moveTo(x0 + i, y0);
+    ctx.lineTo(x0 + i + h, y1);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawHover(a) {
+  pathPolygon(a.pts);
+  ctx.fillStyle = COLORS.hover;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = COLORS.hoverEdge;
+  ctx.stroke();
+}
+
+function drawLabel(a) {
+  const [sx, sy] = toScreen(a.label[0], a.label[1]);
+  const fontSize = Math.max(10, 12 * scale);
+  const text = a.name.toUpperCase();
+  ctx.save();
+  ctx.font = `700 ${fontSize}px system-ui`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const m = ctx.measureText(text);
+  const padX = 6, padY = 3;
+  const bw = m.width + padX * 2;
+  const bh = fontSize + padY * 2;
+  // Pill background
+  ctx.fillStyle = COLORS.labelBg;
+  roundRect(sx - bw / 2, sy - bh / 2, bw, bh, 3);
+  ctx.fill();
+  ctx.fillStyle = COLORS.labelText;
+  ctx.fillText(text, sx, sy + 0.5);
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawGrid() {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 1;
+  const step = 50;
+  for (let x = 0; x <= MAP_W; x += step) {
+    const [sx, sy0] = toScreen(x, 0);
+    const [, sy1] = toScreen(x, MAP_H);
+    ctx.beginPath(); ctx.moveTo(sx, sy0); ctx.lineTo(sx, sy1); ctx.stroke();
+  }
+  for (let y = 0; y <= MAP_H; y += step) {
+    const [sx0, sy] = toScreen(0, y);
+    const [sx1] = toScreen(MAP_W, y);
+    ctx.beginPath(); ctx.moveTo(sx0, sy); ctx.lineTo(sx1, sy); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSpawnArrows() {
+  // Defenders push down into map
+  drawArrow(420, 90, 420, 130);
+  drawArrow(600, 90, 600, 130);
+  drawArrow(780, 90, 780, 130);
+  // Attackers push up out of spawn
+  drawArrow(500, 820, 500, 770);
+  drawArrow(600, 820, 600, 770);
+  drawArrow(700, 820, 700, 770);
+}
+function drawArrow(x0, y0, x1, y1) {
+  const [sx0, sy0] = toScreen(x0, y0);
+  const [sx1, sy1] = toScreen(x1, y1);
+  ctx.save();
+  ctx.strokeStyle = COLORS.arrow;
+  ctx.fillStyle = COLORS.arrow;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(sx0, sy0);
+  ctx.lineTo(sx1, sy1);
+  ctx.stroke();
+  const ang = Math.atan2(sy1 - sy0, sx1 - sx0);
+  const head = 8;
+  ctx.beginPath();
+  ctx.moveTo(sx1, sy1);
+  ctx.lineTo(sx1 - head * Math.cos(ang - Math.PI / 6),
+             sy1 - head * Math.sin(ang - Math.PI / 6));
+  ctx.lineTo(sx1 - head * Math.cos(ang + Math.PI / 6),
+             sy1 - head * Math.sin(ang + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPings() {
+  const now = performance.now();
+  for (let i = pings.length - 1; i >= 0; i--) {
+    const p = pings[i];
+    const age = now - p.t0;
+    if (age > PING_LIFETIME_MS) { pings.splice(i, 1); continue; }
+    const t = age / PING_LIFETIME_MS;       // 0 → 1
+    const alpha = Math.max(0, 1 - t);
+    const r = (8 + t * 38) * scale;
+    const [sx, sy] = toScreen(p.x, p.y);
+    ctx.save();
+    // Expanding ring
+    ctx.strokeStyle = `rgba(${COLORS.pingColor},${alpha.toFixed(3)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner dot
+    ctx.fillStyle = `rgba(${COLORS.pingColor},${(alpha * 0.9).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 5 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawCompass() {
+  const cxLog = MAP_W - 50, cyLog = 32;
+  const [sx, sy] = toScreen(cxLog, cyLog);
+  ctx.save();
+  ctx.fillStyle = COLORS.labelText;
+  ctx.font = `bold ${13 * scale}px system-ui`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('N', sx, sy + 14 * scale);
+  // Arrowhead
+  ctx.fillStyle = COLORS.att;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - 12 * scale);
+  ctx.lineTo(sx - 6 * scale, sy + 4 * scale);
+  ctx.lineTo(sx + 6 * scale, sy + 4 * scale);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ====================================================================
+   INTERACTION HANDLERS
+   ==================================================================== */
+const tooltip = document.getElementById('tooltip');
+const infoName = document.getElementById('info-name');
+const infoDesc = document.getElementById('info-desc');
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const [lx, ly] = toLogical(sx, sy);
+  const a = findArea(lx, ly);
+  hoveredId = a ? a.id : null;
+  if (a) {
+    tooltip.textContent = a.name;
+    tooltip.classList.add('visible');
+    tooltip.style.left = (sx + 14) + 'px';
+    tooltip.style.top = (sy + 14) + 'px';
+    infoName.textContent = a.name;
+    infoDesc.textContent = a.desc || '';
+    canvas.style.cursor = 'pointer';
+  } else {
+    tooltip.classList.remove('visible');
+    infoName.textContent = '—';
+    infoDesc.textContent = 'Hover any callout to inspect';
+    canvas.style.cursor = 'crosshair';
+  }
+});
+
+canvas.addEventListener('mouseleave', () => {
+  hoveredId = null;
+  tooltip.classList.remove('visible');
+  infoName.textContent = '—';
+  infoDesc.textContent = 'Hover any callout to inspect';
+});
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const [lx, ly] = toLogical(e.clientX - rect.left, e.clientY - rect.top);
+  // Only ping inside the map bounds
+  if (lx >= 0 && lx <= MAP_W && ly >= 0 && ly <= MAP_H) {
+    pings.push({ x: lx, y: ly, t0: performance.now() });
+  }
+});
+
+// Touch support: tap to ping
+canvas.addEventListener('touchstart', (e) => {
+  if (!e.touches.length) return;
+  const t = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const [lx, ly] = toLogical(t.clientX - rect.left, t.clientY - rect.top);
+  if (lx >= 0 && lx <= MAP_W && ly >= 0 && ly <= MAP_H) {
+    pings.push({ x: lx, y: ly, t0: performance.now() });
+  }
+}, { passive: true });
+
+// Toggle buttons
+document.getElementById('toggle-labels').addEventListener('click', (e) => {
+  showLabels = !showLabels;
+  e.currentTarget.classList.toggle('active', showLabels);
+});
+document.getElementById('toggle-grid').addEventListener('click', (e) => {
+  showGrid = !showGrid;
+  e.currentTarget.classList.toggle('active', showGrid);
+});
+document.getElementById('clear-pings').addEventListener('click', () => {
+  pings.length = 0;
+});
+
+/* ====================================================================
+   ANIMATION LOOP
+   ==================================================================== */
+function loop() {
+  draw();
+  requestAnimationFrame(loop);
+}
+
+resize();
+loop();
+</script>
+</body>
+</html>
